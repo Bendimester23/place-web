@@ -1,18 +1,23 @@
 mod canvas;
+//mod socket;
 
-use redis::{Commands, ConnectionLike};
 use actix_web::{App, HttpServer, main, web, get, post, Responder, HttpResponse};
 use std::sync::Mutex;
+use actix::{Actor, Addr, Handler};
 use image::EncodableLayout;
 use actix_web::middleware::Logger;
 use actix_web::web::Bytes;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use uuid::Uuid;
+use crate::socket::Lobby;
 
 struct AppData {
-    canvas: Mutex<canvas::CanvasPicture>
+    canvas: Mutex<canvas::CanvasPicture>,
+    //notifs: Mutex<Vec<u8>>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct PlacePixelRequest {
     x: u32,
     y: u32,
@@ -25,16 +30,21 @@ async fn main() {
     println!("Starting web server on port 8080");
 
     let data = web::Data::new(AppData {
-        canvas: Mutex::new(canvas::CanvasPicture::new(256, 256))
+        canvas: Mutex::new(canvas::CanvasPicture::new(256, 256)),
+        //notifs: Mutex::new(vec![0, 1])
     });
+
+    //let lobby = socket::Lobby::default().start();
 
     HttpServer::new(move || {
             App::new()
                 .wrap(Logger::default())
                 .app_data(data.clone())
+                //.app_data(lobby.clone())
                 .service(index)
                 .service(full)
                 .service(place)
+                //.service(socket::start_connection)
         }
     )
         .bind("0.0.0.0:8080").unwrap()
@@ -42,21 +52,32 @@ async fn main() {
 }
 
 #[get("/")]
-async fn index() -> impl Responder {
+async fn index(data: web::Data<AppData>) -> impl Responder {
+    let mut notifs = data.notifs.lock().unwrap();
+
+    notifs.push(1);
+
     "Hello World"
 }
 
 #[post("/place")]
-async fn place(body: web::Json<PlacePixelRequest>, data: web::Data<AppData>) -> impl Responder {
+async fn place(body: web::Json<PlacePixelRequest>, data: web::Data<AppData>/*, srv: web::Data<Addr<Lobby>>*/) -> impl Responder {
     if body.key != String::from("key") {
-        HttpResponse::Forbidden()
+        return HttpResponse::Forbidden().finish();
     }
+
+    // let msg = socket::BroadcastMessage{
+    //     id: Uuid::parse_str("470bb217-ffa7-43d8-a0cc-b3d30421d1werfw").unwrap(),
+    //     msg: json!(body.0),
+    //     room_id:  String::from("place")
+    // };
+    // srv.do_send(msg);
 
     let mut canvas = data.canvas.lock().unwrap();
 
     canvas.set_pixel(body.x, body.y, body.color).unwrap();
 
-    HttpResponse::Created()
+    HttpResponse::Created().finish()
 }
 
 #[get("/full")]
@@ -66,32 +87,4 @@ async fn full(data: web::Data<AppData>) -> HttpResponse {
     HttpResponse::Ok()
         .content_type("image/png")
         .body(Bytes::copy_from_slice(b.as_bytes()))
-}
-
-fn tmp_redis_stuff() {
-    // println!("Hello, world!");
-    // let mut connection = redis::Client::open("redis://:rHCHiMuWiQaAMZeMB7Flr6zlvkmjlEdx@redis-13708.c293.eu-central-1-1.ec2.cloud.redislabs.com:13708/0").unwrap();
-    //
-    // println!("Connected to Redis");
-    //
-    // if !connection.check_connection() {
-    //     println!("No connection");
-    // }
-    //
-    // let _ : () = connection.set("my_key", 42).unwrap();
-    //
-    // let mut conn = connection.get_connection().unwrap();
-    //
-    //
-    // let mut pubsub = conn.as_pubsub();
-    //
-    // pubsub.subscribe("place").unwrap();
-    //
-    // loop {
-    //     let msg = pubsub.get_message().unwrap();
-    //     let content: String = msg.get_payload().unwrap();
-    //     let channel: String = msg.get_channel().unwrap();
-    //
-    //     println!("Got message on: {}, with content: {}", channel, content);
-    // }
 }
